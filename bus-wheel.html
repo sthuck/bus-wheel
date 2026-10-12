@@ -1,0 +1,384 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="theme-color" content="#1f2a44">
+<title>Bus Driver Wheel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&display=swap">
+<style>
+/* Layout: windshield view on top, big wheel in the middle, two chunky dash buttons at the bottom. Single bright "bus cab" look. */
+:root{
+  --cab:#1f2a44; --cab-2:#2c3a5e; --bus:#ffc629; --bus-dark:#c98f00;
+  --sky:#9fdcff; --grass:#6cc56a; --road:#4a5063; --line:#fff6cf;
+  --horn:#ff5a4e; --door:#22b573; --ink:#ffffff; --muted:#b9c4e0;
+  --font:"Baloo 2", "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{margin:0;background:var(--cab);color:var(--ink);font-family:var(--font);overflow:hidden;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;touch-action:none}
+/* Landscape cockpit: road fills the screen, wheel sits big in the middle, horn under the left thumb, doors under the right */
+.app{position:relative;height:100%;overflow:hidden}
+#road{position:absolute;inset:0;width:100%;height:100%;display:block}
+.dash{position:absolute;left:0;right:0;bottom:0;height:22%;background:var(--cab);border-top:6px solid var(--bus)}
+.signal{position:absolute;top:12px;font-size:40px;line-height:1;color:var(--bus);opacity:0;text-shadow:0 2px 0 var(--bus-dark)}
+.signal.l{left:calc(50% - 120px)}.signal.r{right:calc(50% - 120px)}.signal.on{opacity:1}
+.recenter{position:absolute;top:10px;right:16px;font:600 14px var(--font);color:var(--cab);background:rgba(255,255,255,.85);
+  border:0;border-radius:99px;padding:5px 14px}
+.wheel-wrap{position:absolute;left:50%;bottom:-6%;transform:translateX(-50%);display:grid;place-items:center}
+#wheel{width:min(78vh,48vw,520px);height:auto;aspect-ratio:1;max-width:100%;touch-action:none;cursor:grab;
+  filter:drop-shadow(0 10px 0 rgba(0,0,0,.3))}
+.hint{position:absolute;top:12px;left:16px;color:var(--cab);background:rgba(255,255,255,.85);border-radius:99px;
+  padding:5px 14px;font-size:14px;margin:0;max-width:40%}
+.hint:empty{display:none}
+.btn{position:absolute;top:50%;transform:translateY(-50%);width:min(34vh,22vw,170px);aspect-ratio:1;border:0;border-radius:50%;
+  font:800 clamp(16px,5vh,26px)/1 var(--font);color:var(--ink);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;touch-action:none;
+  box-shadow:0 8px 0 rgba(0,0,0,.35);transition:transform .06s, box-shadow .06s}
+.horn{left:max(16px, env(safe-area-inset-left, 0px))} .doors{right:max(16px, env(safe-area-inset-right, 0px))}
+.btn svg{width:42%;height:auto}
+.btn:active,.btn.down{transform:translateY(calc(-50% + 6px));box-shadow:0 2px 0 rgba(0,0,0,.35)}
+.rotate{position:fixed;inset:0;z-index:6;background:var(--cab);display:none;place-items:center;text-align:center;padding:16px}
+.rotate p{font-size:26px;color:var(--bus);margin:0;max-width:280px}
+@media (orientation: portrait){ .rotate{display:grid} }
+.rotate.dismissed{display:none}
+[hidden]{display:none !important}
+.btn:focus-visible,.start:focus-visible,.recenter:focus-visible{outline:4px solid var(--sky);outline-offset:3px}
+.horn{background:var(--horn)} .doors{background:var(--door)}
+.overlay{position:fixed;inset:0;background:rgba(20,28,48,.94);display:grid;place-items:center;z-index:5;padding:16px}
+.overlay-inner{text-align:center;display:grid;gap:14px;justify-items:center;max-width:340px}
+.overlay h1{font-size:40px;margin:0;line-height:1;color:var(--bus);text-wrap:balance}
+.overlay p{margin:0;color:var(--muted);font-size:17px}
+.start{border:0;background:var(--bus);color:var(--cab);font:800 28px var(--font);padding:16px 38px;border-radius:99px;box-shadow:0 7px 0 var(--bus-dark)}
+.start:active{transform:translateY(5px);box-shadow:0 2px 0 var(--bus-dark)}
+@media (prefers-reduced-motion: reduce){.btn,.start{transition:none}}
+</style>
+</head><body>
+
+<div class="app">
+  <canvas id="road" aria-label="Road ahead"></canvas>
+  <div class="dash"></div>
+  <div class="signal l" id="sigL" aria-hidden="true">◀</div>
+  <div class="signal r" id="sigR" aria-hidden="true">▶</div>
+  <button class="recenter" id="recenter" type="button">Straighten</button>
+
+  <div class="wheel-wrap">
+    <svg id="wheel" viewBox="0 0 200 200" role="img" aria-label="Steering wheel">
+      <g id="wheelRot">
+        <circle cx="100" cy="100" r="88" fill="none" stroke="#151c30" stroke-width="20"/>
+        <circle cx="100" cy="100" r="88" fill="none" stroke="#2b3550" stroke-width="12"/>
+        <g fill="#3a4668">
+          <circle cx="100" cy="12" r="7"/><circle cx="100" cy="188" r="7"/>
+          <circle cx="12" cy="100" r="7"/><circle cx="188" cy="100" r="7"/>
+        </g>
+        <!-- top marker so kids see the turn -->
+        <rect x="93" y="2" width="14" height="20" rx="4" fill="#ff5a4e"/>
+        <g fill="#2b3550" stroke="#151c30" stroke-width="3">
+          <path d="M70 92 L20 88 L20 112 L70 108 Z"/>
+          <path d="M130 92 L180 88 L180 112 L130 108 Z"/>
+          <path d="M90 130 L86 180 L114 180 L110 130 Z"/>
+        </g>
+        <circle cx="100" cy="100" r="36" fill="#ffc629" stroke="#c98f00" stroke-width="5"/>
+        <!-- little bus on the hub -->
+        <g transform="translate(78 86)">
+          <rect x="0" y="0" width="44" height="22" rx="5" fill="#1f2a44"/>
+          <rect x="4" y="4" width="9" height="7" rx="1.5" fill="#9fdcff"/>
+          <rect x="16" y="4" width="9" height="7" rx="1.5" fill="#9fdcff"/>
+          <rect x="28" y="4" width="12" height="7" rx="1.5" fill="#9fdcff"/>
+          <circle cx="11" cy="23" r="4" fill="#151c30"/><circle cx="33" cy="23" r="4" fill="#151c30"/>
+        </g>
+      </g>
+    </svg>
+  </div>
+  <p class="hint" id="hint"></p>
+
+    <button class="btn horn" id="horn" type="button">
+      <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M6 19h8l14-9v28l-14-9H6z" fill="#fff"/><path d="M34 16c3 2 4 5 4 8s-1 6-4 8M38 11c5 3 7 8 7 13s-2 10-7 13" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/></svg>
+      HONK
+    </button>
+    <button class="btn doors" id="doors" type="button">
+      <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="6" width="36" height="38" rx="3" fill="none" stroke="#fff" stroke-width="3.5"/><path id="doorL" d="M10 10h12v30H10z" fill="#fff"/><path id="doorR" d="M26 10h12v30H26z" fill="#fff"/></svg>
+      DOORS
+    </button>
+</div>
+
+<div class="rotate" id="rotate" aria-live="polite"><p>Turn the phone sideways and hold it like a steering wheel<br><small style="color:#b9c4e0;font-size:16px">(or tap to play anyway)</small></p></div>
+
+<div class="overlay" id="overlay">
+  <div class="overlay-inner">
+    <h1>Ready to drive the bus?</h1>
+    <p>Hold the phone sideways with two hands, keep it straight, and press start. Then turn it like a steering wheel.</p>
+    <button class="start" id="start" type="button">Start engine</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const wheelRot = $('wheelRot'), wheel = $('wheel'), hint = $('hint');
+  const MAX = 135;
+  let target = 0, shown = 0, prevShown = 0, gotMotion = false, base = null, lastGamma = null;
+  let dragging = false, dragStartAngle = 0, dragStartTarget = 0;
+
+  /* ---------- Audio ---------- */
+  let ctx, master, engine, hornOut;
+  function makeNoise(sec){
+    const b = ctx.createBuffer(1, ctx.sampleRate*sec, ctx.sampleRate), d = b.getChannelData(0);
+    for (let i=0;i<d.length;i++) d[i] = Math.random()*2-1;
+    return b;
+  }
+  function startAudio(){
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0.8; master.connect(ctx.destination);
+    // Horn gets its own full-volume path (the distortion already keeps it at max level)
+    hornOut = ctx.createGain(); hornOut.gain.value = 0.95;
+    hornOut.connect(ctx.destination);
+    // Diesel engine: two low oscillators, low-passed, with a fast "chug" wobble
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value = 380;
+    const eg = ctx.createGain(); eg.gain.value = 0.22;
+    const o1 = ctx.createOscillator(); o1.type='sawtooth'; o1.frequency.value = 42;
+    const o2 = ctx.createOscillator(); o2.type='square'; o2.frequency.value = 21;
+    const g2 = ctx.createGain(); g2.gain.value = 0.5;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 10;
+    const lfoG = ctx.createGain(); lfoG.gain.value = 0.12;
+    lfo.connect(lfoG).connect(eg.gain);
+    o1.connect(lp); o2.connect(g2).connect(lp); lp.connect(eg).connect(master);
+    [o1,o2,lfo].forEach(o=>o.start());
+    engine = {o1,o2,lfo,lp,eg};
+    // rev up on start
+    const t = ctx.currentTime;
+    o1.frequency.setValueAtTime(30,t); o1.frequency.linearRampToValueAtTime(70,t+0.6); o1.frequency.linearRampToValueAtTime(42,t+1.4);
+  }
+  function setEngine(level){ // 0..1
+    if(!engine) return;
+    const t = ctx.currentTime, f = 42 + level*38;
+    engine.o1.frequency.setTargetAtTime(f, t, 0.25);
+    engine.o2.frequency.setTargetAtTime(f/2, t, 0.25);
+    engine.lfo.frequency.setTargetAtTime(10 + level*14, t, 0.25);
+    engine.lp.frequency.setTargetAtTime(380 + level*500, t, 0.3);
+  }
+
+  let horn = null;
+  function hornOn(){
+    if(!ctx || horn) return;
+    const t = ctx.currentTime, g = ctx.createGain(), f = ctx.createBiquadFilter();
+    f.type='lowpass'; f.frequency.value = 4000;
+    // distortion for a brassy, punchy air-horn sound
+    const shaper = ctx.createWaveShaper(), curve = new Float32Array(1024);
+    for(let i=0;i<1024;i++){ const x = i/512-1; curve[i] = Math.tanh(x*6); }
+    shaper.curve = curve;
+    const pre = ctx.createGain(); pre.gain.value = 0.6;
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(1.0,t+0.02);
+    const oscs = [];
+    [311, 392, 466].forEach(fr => [0, 3].forEach(det => {
+      const o = ctx.createOscillator(); o.type='sawtooth'; o.frequency.value=fr; o.detune.value=det*4;
+      o.connect(pre); o.start(); oscs.push(o);
+    }));
+    pre.connect(shaper).connect(f).connect(g).connect(hornOut);
+    if(engine) engine.eg.gain.setTargetAtTime(0.08, t, 0.03); // duck the engine
+    horn = {g, oscs};
+    $('horn').classList.add('down');
+  }
+  function hornOff(){
+    if(!horn) return;
+    const t = ctx.currentTime, h = horn; horn = null;
+    h.g.gain.setTargetAtTime(0,t,0.03);
+    h.oscs.forEach(o=>o.stop(t+0.2));
+    if(engine) engine.eg.gain.setTargetAtTime(0.22, t, 0.1);
+    $('horn').classList.remove('down');
+  }
+
+  let doorsOpen = false, doorBusy = false;
+  function doors(){
+    if(!ctx || doorBusy) return;
+    doorBusy = true;
+    const t = ctx.currentTime;
+    if(!doorsOpen){
+      // open: loud air blast "PSSSHH", then the doors slam open
+      hiss(t); clunk(t+0.55);
+      animateDoors(true, 550);
+    } else {
+      // close: warning beeps, air blast, doors bang shut
+      beeps(t); hiss(t+0.9); clunk(t+1.4);
+      animateDoors(false, 1400);
+    }
+    doorsOpen = !doorsOpen;
+    setTimeout(()=>doorBusy=false, 2000);
+  }
+  function hiss(t){ // pneumatic door "PSSSHHHT": sharp burst, then air rushing out
+    const s = ctx.createBufferSource(); s.buffer = makeNoise(1.1);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 1200;
+    const pk = ctx.createBiquadFilter(); pk.type='peaking'; pk.frequency.value = 4500; pk.Q.value = 1; pk.gain.value = 12;
+    pk.frequency.setValueAtTime(6500,t); pk.frequency.exponentialRampToValueAtTime(2500,t+0.9);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.9,t+0.008);
+    g.gain.setValueAtTime(0.9,t+0.12); g.gain.exponentialRampToValueAtTime(0.35,t+0.4);
+    g.gain.exponentialRampToValueAtTime(0.001,t+1.0);
+    s.connect(hp).connect(pk).connect(g).connect(hornOut); s.start(t); s.stop(t+1.1);
+  }
+  function clunk(t){ // heavy door hitting the stop: low thump + metal knock
+    const o = ctx.createOscillator(), og = ctx.createGain(); o.type='sine';
+    o.frequency.setValueAtTime(140,t); o.frequency.exponentialRampToValueAtTime(45,t+0.18);
+    og.gain.setValueAtTime(1,t); og.gain.exponentialRampToValueAtTime(0.001,t+0.25);
+    o.connect(og).connect(hornOut); o.start(t); o.stop(t+0.3);
+    const n = ctx.createBufferSource(); n.buffer = makeNoise(0.15);
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 900; bp.Q.value = 3;
+    const ng = ctx.createGain(); ng.gain.setValueAtTime(1,t); ng.gain.exponentialRampToValueAtTime(0.001,t+0.12);
+    n.connect(bp).connect(ng).connect(hornOut); n.start(t);
+  }
+  function beeps(t){ // "doors closing" warning beep-beep-beep
+    for(let i=0;i<3;i++){
+      const st = t + i*0.28, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type='square'; o.frequency.value = 1900;
+      g.gain.setValueAtTime(0,st); g.gain.linearRampToValueAtTime(0.35,st+0.005);
+      g.gain.setValueAtTime(0.35,st+0.15); g.gain.linearRampToValueAtTime(0,st+0.16);
+      o.connect(g).connect(hornOut); o.start(st); o.stop(st+0.17);
+    }
+  }
+  function tick(){
+    if(!ctx) return;
+    const t = ctx.currentTime, s = ctx.createBufferSource(); s.buffer = makeNoise(0.03);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 2500;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.35,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.03);
+    s.connect(hp).connect(g).connect(master); s.start(t);
+  }
+  function animateDoors(open, delay){
+    setTimeout(()=>{
+      $('doorL').setAttribute('d', open ? 'M10 10h3v30h-3z' : 'M10 10h12v30H10z');
+      $('doorR').setAttribute('d', open ? 'M35 10h3v30h-3z' : 'M26 10h12v30H26z');
+    }, delay);
+  }
+
+  /* ---------- Steering input ---------- */
+  function onMotion(e){
+    const g = e.accelerationIncludingGravity;
+    if(!g || g.x == null || dragging) return;
+    if(!gotMotion){ gotMotion = true; hint.textContent = ''; } // clear a "no sensor" hint shown while the iOS prompt was open
+    if(Math.hypot(g.x, g.y) < 4){ // phone lying flat: use side tilt instead
+      if(lastGamma != null) target = clamp(lastGamma*2.2);
+      return;
+    }
+    const a = Math.atan2(g.x, g.y) * 180 / Math.PI;
+    if(base === null) base = a;
+    // Gain 2: full lock at ~65° of phone tilt, so the OS is less likely to auto-rotate the screen mid-turn
+    target = clamp(-wrap(a - base) * 2);
+  }
+  function onOrient(e){
+    if(e.gamma == null) return;
+    const sa = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    // phone lying flat: side-to-side tilt is beta in landscape, gamma in portrait
+    lastGamma = sa === 90 ? -e.beta : (sa === 270 || sa === -90) ? e.beta : e.gamma;
+  }
+  const wrap = d => ((d + 540) % 360) - 180;
+  const clamp = v => Math.max(-MAX, Math.min(MAX, v));
+
+  function pointerAngle(e){
+    const r = wheel.getBoundingClientRect();
+    return Math.atan2(e.clientX - (r.left + r.width/2), -(e.clientY - (r.top + r.height/2))) * 180/Math.PI;
+  }
+  wheel.addEventListener('pointerdown', e => {
+    dragging = true; wheel.setPointerCapture(e.pointerId);
+    dragStartAngle = pointerAngle(e); dragStartTarget = target;
+  });
+  wheel.addEventListener('pointermove', e => {
+    if(dragging) target = clamp(dragStartTarget + wrap(pointerAngle(e) - dragStartAngle));
+  });
+  const endDrag = () => { if(dragging){ dragging = false; if(!gotMotion) target = 0; } };
+  wheel.addEventListener('pointerup', endDrag);
+  wheel.addEventListener('pointercancel', endDrag);
+
+  $('recenter').addEventListener('click', () => { base = null; target = 0; });
+  // No reset on screen rotation: steering is measured in the phone's own frame, so it stays correct.
+
+  /* ---------- Buttons ---------- */
+  const hb = $('horn');
+  hb.addEventListener('pointerdown', e => { e.preventDefault(); hornOn(); });
+  ['pointerup','pointerleave','pointercancel'].forEach(ev => hb.addEventListener(ev, hornOff));
+  hb.addEventListener('keydown', e => { if(e.key===' '||e.key==='Enter'){ e.preventDefault(); hornOn(); }});
+  hb.addEventListener('keyup', hornOff);
+  $('doors').addEventListener('click', doors);
+
+  $('rotate').addEventListener('click', () => $('rotate').classList.add('dismissed'));
+  const quiet = p => { try { Promise.resolve(p).catch(()=>{}); } catch(_) {} };
+  $('start').addEventListener('click', () => {
+    // Everything that needs the tap happens right away; nothing here waits, so Start can't get stuck.
+    try { startAudio(); ctx.resume(); } catch(_) {}
+    $('overlay').hidden = true;
+    // Once driving, never let an accidental flip to portrait cover the game with the "turn sideways" screen
+    $('rotate').classList.add('dismissed');
+    base = null;
+    window.addEventListener('devicemotion', onMotion);
+    window.addEventListener('deviceorientation', onOrient);
+    try {
+      if(window.DeviceMotionEvent?.requestPermission)
+        DeviceMotionEvent.requestPermission()
+          .then(s => { if(s !== 'granted') hint.textContent = 'Tilt is off (allow Motion in Safari settings), drag the wheel to steer'; })
+          .catch(()=>{});
+    } catch(_) {}
+    try { if(window.DeviceOrientationEvent?.requestPermission) quiet(DeviceOrientationEvent.requestPermission()); } catch(_) {}
+    // Fullscreen + landscape lock (Android); ignored where not allowed
+    try {
+      const fs = document.documentElement.requestFullscreen?.({navigationUI:'hide'});
+      if(fs) fs.then(() => quiet(screen.orientation?.lock?.('landscape'))).catch(()=>{});
+    } catch(_) {}
+    try { quiet(navigator.wakeLock?.request('screen')); } catch(_) {}
+    setTimeout(() => { if(!gotMotion) hint.textContent = 'No tilt sensor here, drag the wheel to steer'; }, 2000);
+  });
+
+  /* ---------- Road + loop ---------- */
+  const cv = $('road'), c2 = cv.getContext('2d');
+  let dash = 0, curve = 0, blinkT = 0, blinkOn = false;
+  function resize(){
+    const r = cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
+    cv.width = r.width*dpr; cv.height = r.height*dpr; c2.setTransform(dpr,0,0,dpr,0,0);
+  }
+  addEventListener('resize', resize); resize();
+
+  function drawRoad(w, h){
+    const hz = h*0.42;
+    c2.fillStyle = '#9fdcff'; c2.fillRect(0,0,w,hz);
+    // hills drift opposite to steering
+    const off = -curve*1.2;
+    c2.fillStyle = '#86c97f';
+    for(let i=-2;i<4;i++){ c2.beginPath(); c2.ellipse(off % 160 + i*160, hz, 110, 34, 0, Math.PI, 0); c2.fill(); }
+    // sun
+    c2.fillStyle = '#ffe680'; c2.beginPath(); c2.arc(w*0.82 + off*0.4 % w, hz*0.4, 16, 0, 7); c2.fill();
+    c2.fillStyle = '#6cc56a'; c2.fillRect(0,hz,w,h-hz);
+    const vx = w/2 - curve*1.6; // vanishing point follows the turn
+    c2.fillStyle = '#4a5063';
+    c2.beginPath(); c2.moveTo(vx-6,hz); c2.lineTo(vx+6,hz); c2.lineTo(w*0.95,h); c2.lineTo(w*0.05,h); c2.closePath(); c2.fill();
+    // scrolling centre dashes
+    c2.fillStyle = '#fff6cf';
+    for(let i=0;i<10;i++){
+      let p = ((i/10) + dash) % 1, z1 = p*p, z2 = Math.min(1,(p+0.05)*(p+0.05));
+      const y1 = hz + (h-hz)*z1, y2 = hz + (h-hz)*z2;
+      const x1 = vx + (w/2 - vx)*z1, x2 = vx + (w/2 - vx)*z2;
+      const wd1 = 1 + z1*7, wd2 = 1 + z2*7;
+      c2.beginPath(); c2.moveTo(x1-wd1,y1); c2.lineTo(x1+wd1,y1); c2.lineTo(x2+wd2,y2); c2.lineTo(x2-wd2,y2); c2.fill();
+    }
+  }
+
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(0.05, (now-last)/1000); last = now;
+    shown += (target - shown) * Math.min(1, dt*10);
+    wheelRot.setAttribute('transform', `rotate(${shown.toFixed(1)} 100 100)`);
+    const spin = Math.abs(shown - prevShown) / Math.max(dt, 0.001); prevShown = shown;
+    curve += (shown - curve) * Math.min(1, dt*2);
+    const running = !$('overlay').hidden ? 0.4 : 1;
+    dash = (dash + dt*0.9*running) % 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if(w && h) drawRoad(w,h);
+    setEngine(Math.min(1, Math.abs(shown)/MAX*0.7 + Math.min(1, spin/300)*0.5));
+    // turn signal
+    const dir = shown > 28 ? 'r' : shown < -28 ? 'l' : '';
+    blinkT += dt;
+    if(dir && blinkT > 0.4){ blinkT = 0; blinkOn = !blinkOn; if(blinkOn) tick(); }
+    if(!dir){ blinkOn = false; }
+    $('sigL').classList.toggle('on', dir==='l' && blinkOn);
+    $('sigR').classList.toggle('on', dir==='r' && blinkOn);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body></html>
